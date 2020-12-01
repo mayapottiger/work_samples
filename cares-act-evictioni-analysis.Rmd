@@ -1,0 +1,278 @@
+---
+title: "cares-act-eviction-analysis"
+author: "Maya Pottiger"
+date: "12/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(janitor)
+library(arcos)
+library(scales)
+library(ggrepel)
+library(tidycensus)
+library(dplyr)
+library(rvest)
+library(mapview)
+library(lsr)
+library(corrr)
+library(stringr)
+library(leaflet)
+library(tigris)
+library(readxl)
+library(tm)
+library(ggplot2)
+
+```
+
+```{r}
+
+# reading in the data
+
+all_data <- read_csv("standardized_evictions_all_2019_2020_clean_pla_def copy.csv")
+housing_insecurity <- read.csv("export.csv")
+employment_income_loss <- read_csv("export2.csv")
+
+```
+
+```{r}
+
+# cleaning punctuation in plaintiff name to allow better and more accurate grouping
+
+all_data <- all_data %>%
+  mutate_at("plaintiff_cleaned", ~str_replace_all(., "&", "\\s"))
+
+all_data <- all_data %>%
+  mutate_at("plaintiff_cleaned", ~str_replace_all(., ",", ""))
+
+all_data <- all_data %>%
+  mutate_at("plaintiff_cleaned", ~str_replace_all(., "/", ""))
+
+all_data <- all_data %>%
+  mutate_at("plaintiff_cleaned", ~str_replace_all(., "-", "\\s"))
+
+all_data <- all_data %>%
+  mutate_at("plaintiff_cleaned", ~str_replace_all(., "\\.", ""))
+
+all_data <- all_data %>%
+  mutate_at("plaintiff_cleaned", ~str_replace_all(., "'", ""))
+
+all_data <- all_data %>%
+  mutate_at("plaintiff_cleaned", ~str_replace_all(., "as trustee", ""))
+
+```
+
+```{r}
+
+# broke large dataset into smaller dataframes based on county for easier analysis and filtered for evictions filed after the CARES Act went into effect
+
+hillsborough_2020 <- all_data_clean %>%
+  filter(str_detect(location, "fl_hillsborough")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned) %>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+pinellas_2020 <- all_data_clean %>%
+  filter(str_detect(location, "fl_pinellas")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+chatham_2020 <- all_data_clean %>%
+  filter(str_detect(location, "ga_chatham")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+dekalb_2020 <- all_data_clean %>%
+  filter(str_detect(location, "ga_dekalb")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+fulton_2020 <- all_data_clean %>%
+  filter(str_detect(location, "ga_fulton")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+neworleans_2020 <- all_data_clean %>%
+  filter(str_detect(location, "la_neworleans")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+toledo_2020 <- all_data_clean %>%
+  filter(str_detect(location, "oh_toledo")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+okc_2020 <- all_data_clean %>%
+  filter(str_detect(location, "ok_okc")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+tulsa_2020 <- all_data_clean %>%
+  filter(str_detect(location, "ok_tulsa")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+shelby_2020 <- all_data_clean %>%
+  filter(str_detect(location, "tn_shelby")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+milwaukee_2020 <- all_data_clean %>%
+  filter(str_detect(location, "wi_milwaukee")) %>%
+  filter(file_date > "2020-03-27") %>%
+  select(location, plaintiff_cleaned)%>%
+  group_by(location, plaintiff_cleaned) %>%
+  summarise(total = n())
+
+```
+
+```{r}
+
+# looked into landlords that were filing evictions in multiple counties or states
+
+landlords_multicounty <- hillsborough %>%
+  bind_rows(pinellas) %>%
+  bind_rows(chatham) %>%
+  bind_rows(dekalb) %>%
+  bind_rows(fulton) %>%
+  bind_rows(neworleans) %>%
+  bind_rows(toledo) %>%
+  bind_rows(okc) %>%
+  bind_rows(tulsa) %>%
+  bind_rows(shelby) %>%
+  bind_rows(milwaukee)
+
+landlords_pivot <- landlords_multicounty %>%
+  mutate(total = 1) %>%
+  select(plaintiff_cleaned, location, total) %>%
+  pivot_wider(names_from=location, values_from = total) %>%
+  mutate(fl_pinellas = case_when(is.na(fl_pinellas) ~ 0,
+                                 TRUE ~ fl_pinellas)) %>%
+  mutate(fl_hillsborough = case_when(is.na(fl_hillsborough) ~ 0,
+                                 TRUE ~ fl_hillsborough)) %>%
+  mutate(ga_chatham = case_when(is.na(ga_chatham) ~ 0,
+                                 TRUE ~ ga_chatham)) %>%
+  mutate(ga_dekalb = case_when(is.na(ga_dekalb) ~ 0,
+                                 TRUE ~ ga_dekalb)) %>%
+  mutate(ga_fulton = case_when(is.na(ga_fulton) ~ 0,
+                                 TRUE ~ ga_fulton)) %>%
+  mutate(la_neworleans = case_when(is.na(la_neworleans) ~ 0,
+                                 TRUE ~ la_neworleans)) %>%
+  mutate(oh_toledo = case_when(is.na(oh_toledo) ~ 0,
+                                 TRUE ~ oh_toledo)) %>%
+  mutate(ok_okc = case_when(is.na(ok_okc) ~ 0,
+                                 TRUE ~ ok_okc)) %>%
+  mutate(ok_tulsa = case_when(is.na(ok_tulsa) ~ 0,
+                                 TRUE ~ ok_tulsa)) %>%
+  mutate(tn_shelby = case_when(is.na(tn_shelby) ~ 0,
+                                 TRUE ~ tn_shelby)) %>%
+  mutate(wi_milwaukee = case_when(is.na(wi_milwaukee) ~ 0,
+                                 TRUE ~ wi_milwaukee)) %>%
+  mutate(total_counties = `fl_hillsborough`+`fl_pinellas`+`ga_chatham`+`ga_dekalb`+`ga_fulton`+`la_neworleans`+`oh_toledo`+`ok_okc`+`ok_tulsa`+`tn_shelby`+`wi_milwaukee`) %>%
+  filter(total_counties > 1)
+
+landlords_pivot <- landlords_pivot %>%
+  select(plaintiff_cleaned, total_counties, fl_hillsborough, fl_pinellas, ga_chatham, ga_dekalb, ga_fulton, la_neworleans, oh_toledo, ok_okc, ok_tulsa, tn_shelby, wi_milwaukee) %>%
+  arrange(desc(total_counties))
+
+# from there, pulled First Key Homes out as a landlord that filed hundred of evictions in Georgia and Tennessee, as well as a few in Florida
+
+all_data_clean %>%
+  filter(str_detect(plaintiff_cleaned, "first key homes llc")) %>%
+  group_by(location) %>%
+  summarise(total = n())
+
+```
+
+```{r}
+
+# used census pulse data to learn about the demographics being filed against despite the moratorium in place
+
+employment_income_loss <- employment_income_loss %>%
+  rename("income_loss_num" = "Number") %>%
+  rename("income_loss_percent" = "Percent") %>%
+  rename("population" = "Total Individual Population age 18+")
+
+housing_insecurity <- housing_insecurity %>%
+  rename("housing_insecurity_total" = "Number") %>%
+  rename("housing_insecurity_percent" = "Percent")
+
+# combined the two tables
+
+census_pulse <- employment_income_loss %>%
+  bind_cols(housing_insecurity) %>%
+  select(Week, Area, population, income_loss_num, income_loss_percent, housing_insecurity_total, housing_insecurity_percent)
+
+# filtered out the states we're looking at from the pulse data
+
+georgia_census <- census_pulse %>%
+  filter(str_detect(Area, "Georgia"))
+
+florida_census <- census_pulse %>%
+  filter(str_detect(Area, "Florida"))
+
+ok_census <- census_pulse %>%
+  filter(str_detect(Area, "Oklahoma"))
+
+la_census <- census_pulse %>%
+  filter(str_detect(Area, "Louisiana"))
+
+ohio_census <- census_pulse %>%
+  filter(str_detect(Area, "Ohio"))
+
+ten_census <- census_pulse %>%
+  filter(str_detect(Area, "Tennessee"))
+
+wi_census <- census_pulse %>%
+  filter(str_detect(Area, "Wisconsin"))
+
+# made a dataset to graph different demographics
+
+census_graph <- georgia_census %>%
+  bind_rows(florida_census) %>%
+  bind_rows(ok_census) %>%
+  bind_rows(la_census) %>%
+  bind_rows(ohio_census) %>%
+  bind_rows(ten_census) %>%
+  bind_rows(wi_census)
+
+```
+
+```{r}
+
+# graphed income loss by week in the counties we were looking at
+
+ggplot(census_1) +
+  geom_bar(stat="identity", aes(Area, income_loss_percent, fill=Area)) +
+  labs(x="Week", y="Percent Loss", title="Week 1 Employment Income Loss", subtitle = "April 23 - May 5", caption = "Source: Census", fill="State") +
+  #scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)) +
+  #scale_y_continuous(labels = comma) +
+  #facet_wrap(nrow=2, . ~ Area) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
