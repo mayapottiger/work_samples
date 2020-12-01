@@ -1,0 +1,244 @@
+---
+title: "POTTIGER_FINAL_PROJECT"
+author: "Maya Pottiger"
+date: "12/8/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+# running libraries to use
+
+library(tidyverse)
+library(janitor)
+library(arcos)
+library(scales)
+library(ggrepel)
+library(tidycensus)
+library(dplyr)
+library(rvest)
+library(mapview)
+library(lsr)
+library(corrr)
+library(stringr)
+
+```
+
+```{r}
+
+# This is from lab_O7. I requested my own key from the census: 
+
+key <- "uO4EK6I"
+
+census_api_key("366af81ca42273ae67ad0729766f54f041bd300d")
+
+# The following graf is from lab_07:
+
+# Store a table with the median household income value for each county using the get_acs() function.  ACS is short for American Community Survey, one of two main census products. In the table that's loaded in, the :estimate" is the median household income for that county, averaged over 5 years ending in 2006. 
+
+county_median_household_income <- get_acs(geography = "county", variables = c("B19013_001"), survey="acs5", year = 2012)
+
+# How did I get the variables? I pulled in a table from the tidycensus package that lists all of the thousands of variables available through the census. Load the table below and view it.  Use filters in the R Viewer window to find things you might want to use later. You can also find table and variable numbers at https://data.census.gov/cedsci/.
+
+acs_variables <- load_variables(2012, "acs5", cache = TRUE)
+
+```
+
+```{r}
+
+# I wanted a quick way to show the relationships between all of these variables. The correlate function does this without creating a ton of scatter plots. The highest correlations are between total pills and white percentage, and poverty rate and pills per person.
+
+pills <- summarized_county_annual(key = key)
+
+unemployment_by_healthcare <- get_acs(geography = "county", variables = c("B27011_008"), year = 2012)
+
+race <- get_acs(geography = "county", variables = c("B02001_001"), year = 2012)
+
+poverty_rate <- get_acs(geography = "county", variables = c("B06012_002"), year = 2012)
+
+aac_white <- get_acs(geography = "county", variables = c("B02001_002"), year = 2012)
+
+white_pop <- aac_white %>%
+  inner_join(race, by="GEOID") %>%
+  select(GEOID, NAME.x, estimate.x, estimate.y) %>%
+  mutate(white_percentage = estimate.x/estimate.y *100)
+
+pop_poverty <- race %>%
+  inner_join(poverty_rate, by=c("GEOID")) %>%
+  select(GEOID, NAME.x, estimate.x, estimate.y) %>%
+  mutate(poverty_rate = estimate.y/estimate.x *100) 
+
+white_poverty <- pop_poverty %>%
+  inner_join(white_pop, by="GEOID") %>%
+  select(GEOID, NAME.x.x, poverty_rate, white_percentage)
+
+total_unemplyment <- unemployment_by_healthcare %>%
+  inner_join(race, by="GEOID") %>%
+  select(GEOID, NAME.x, estimate.x, estimate.y) %>%
+  mutate(unemployment_rate = estimate.x/estimate.y *100)
+
+everything <- total_unemplyment %>%
+  inner_join(white_poverty, by="GEOID") %>%
+  select(GEOID, NAME.x, unemployment_rate, poverty_rate, white_percentage)
+
+pills_population <- pills %>%
+  inner_join(race, by=c("countyfips" = "GEOID")) %>%
+  group_by(BUYER_COUNTY, BUYER_STATE, countyfips) %>%
+  summarise(total_pills = sum(DOSAGE_UNIT), total_population = sum(estimate)) %>%
+  mutate(pills_per_person = total_pills/total_population) %>%
+  inner_join(everything, by=c("countyfips" = "GEOID"))
+
+pills_population <- as.data.frame(pills_population)
+
+pills_population %>%
+  select(-BUYER_COUNTY, -BUYER_STATE, -countyfips, -NAME.x) %>%
+  correlate()
+
+```
+
+```{r}
+
+# I wanted to visualize the relationship between pills per person and poverty rate. This scatter plot is the most interesting to look at, as the points are more spread out. There are a few outliers, but you can see that the highest density of of pills per person is when the poverty rate is lower. This is relatively in line with what I found when researching the opioid crisis, which said it largely impacted the white and poor populations.
+
+ggplot(pills_population) +
+  geom_point(aes(poverty_rate, pills_per_person)) +
+  labs(title="Pills Per Person and Poverty Rate", caption = "Source: DEA ARCOS database, via Washington Post", fill="") +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(labels = comma) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_smooth(aes(poverty_rate, pills_per_person), method = "loess", se = FALSE)
+
+```
+
+```{r}
+
+# This further shows what I found in the last chart, which is that the lower the median household income, the larger the pills per person.
+
+pills_county <- everything %>%
+  inner_join(pills, by=c("GEOID" = "countyfips")) %>%
+  group_by(NAME.x, BUYER_COUNTY, BUYER_STATE, GEOID) %>%
+  summarise(total_pills = sum(DOSAGE_UNIT))
+
+everything_county <- everything %>%
+  inner_join(pills_county, by="GEOID") %>%
+  select(GEOID, NAME.x.x, unemployment_rate, poverty_rate, white_percentage, total_pills)
+
+everything_income <- everything_county %>%
+  inner_join(county_median_household_income, by="GEOID") %>%
+  select(GEOID, NAME.x.x, unemployment_rate, white_percentage, poverty_rate, total_pills, estimate)
+
+pills_population <- pills %>%
+  inner_join(race, by=c("countyfips" = "GEOID")) %>%
+  group_by(BUYER_COUNTY, BUYER_STATE, countyfips) %>%
+  summarise(total_pills = sum(DOSAGE_UNIT), total_population = sum(estimate)) %>%
+  mutate(pills_per_person = total_pills/total_population) %>%
+  inner_join(everything, by=c("countyfips" = "GEOID"))
+
+pills_median <- everything_income %>%
+  inner_join(pills_population, by=c("NAME.x.x" = "NAME.x")) %>%
+  select(GEOID, NAME.x.x, pills_per_person, total_pills.x, estimate)
+
+ggplot(pills_median) +
+  geom_point(aes(estimate, pills_per_person)) +
+  labs(title="Pills Per Person and Median Household Income", caption = "Source: DEA ARCOS database, via Washington Post", fill="") +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(labels = comma) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_smooth(aes(estimate, pills_per_person), method = "loess", se = FALSE)
+
+```
+
+```{r}
+
+# This shows the correlation between the percentage of each race in a county and how that correlates with pills per person in a county. From this, I can see that the white percentage has the strongest correlation with pills per person than any other race I tested.
+
+aac_asian <- get_acs(geography = "county", variables = c("B02001_005"), year = 2012)
+
+aac_black <- get_acs(geography = "county", variables = c("B02001_003"), year = 2012)
+
+aac_race <- get_acs(geography = "county", variables = c("B02001_001"), year = 2012)
+
+pills_race <- everything_income %>%
+  inner_join(aac_asian, by="GEOID") %>%
+  inner_join(aac_black, by="GEOID") %>%
+  inner_join(aac_race, by="GEOID") %>%
+  rename("black" = "estimate.x.x") %>%
+  rename("white" = "estimate.y.y") %>%
+  rename("asian" = "estimate.y")%>%
+  select(GEOID, NAME.x.x, black, white, asian, total_pills)
+
+race_pills_per_person <- pills_race %>%
+  mutate(black_percentage = (black/(white+black+asian)*100)) %>%
+  mutate(white_percentage = (white/(white+black+asian)*100)) %>%
+  mutate(asian_percentage = (asian/(white+black+asian)*100)) %>%
+  mutate(non_white_percentage = 100-white_percentage) %>%
+  inner_join(pills_median, by="GEOID") %>%
+  select(GEOID, NAME.x.x.x, black_percentage, white_percentage, asian_percentage, non_white_percentage, pills_per_person)
+
+options(scipen=999)
+
+race_pills_per_person %>%
+  select(-GEOID, -NAME.x.x.x) %>%
+  correlate() %>%
+  slice(5) 
+
+```
+
+```{r}
+
+# I used this to find where in the country had the strongest correlation of the white population and median household income to pills per person. From this, I was able to find the nine counties in Kentucky that were majority white with a median household income of under $25,000. 
+
+pills_median_case <- pills_median %>%
+  mutate(income = case_when(
+    estimate >= 75000 ~ "75+",
+    estimate >= 50000 ~ "50-74.99",
+    estimate >= 25000 ~ "25-49.99",
+    TRUE ~ "25 under")
+  ) %>%
+  # group_by(income) %>%
+  # summerise((average = mean(pills_per_person))
+  inner_join(race_pills_per_person, by="GEOID") %>%
+  mutate(nonewhite_percentage = case_when(
+    non_white_percentage >= 20 ~ "20+ Nonwhite Percentage",
+    TRUE ~ "Under 20 Nonwhite Percentage")) 
+
+
+pills_median_case%>%
+  group_by(income, nonewhite_percentage) %>%
+  summarise(average = mean(pills_per_person.x),
+            count=n()) %>%
+  arrange(desc(nonewhite_percentage, income))
+  
+pills_median_case %>%
+  filter(nonewhite_percentage == "Under 20 Nonwhite Percentage") %>%
+  ggplot() +
+  geom_point(aes(estimate, pills_per_person.x)) +
+  labs(title="Pills Per Person and Median Household Income", caption = "Source: DEA ARCOS database, via Washington Post", fill="") +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(labels = comma) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_smooth(aes(estimate, pills_per_person.x), method = "loess", se = FALSE)
+
+pills_median_case %>%
+  filter(nonewhite_percentage == "Under 20 Nonwhite Percentage") %>%
+  select(estimate, pills_per_person.x) %>%
+  correlate()
+
+
+```
+
+```{r}
+
+# I used this to find which pharmacies in Clay County received the most pills and how far back the records for those pharmacies went. This also helped me figure out how many chain and retail pharmacies were in Clay County. 
+
+buyer_annual <- combined_buyer_annual(key = key) %>%
+  filter(BUYER_STATE == "KY", BUYER_COUNTY == "CLAY", year == "2012") %>%
+  group_by(BUYER_COUNTY, BUYER_STATE, BUYER_BUS_ACT) %>%
+  summarise(n())
+
+```
+
