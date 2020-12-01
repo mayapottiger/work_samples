@@ -1,0 +1,200 @@
+---
+title: "dc-311-analysis"
+author: "Maya Pottiger"
+date: "12/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(janitor)
+library(arcos)
+library(scales)
+library(ggrepel)
+library(tidycensus)
+library(dplyr)
+library(rvest)
+library(mapview)
+library(lsr)
+library(corrr)
+library(stringr)
+library(leaflet)
+library(tigris)
+library(readxl)
+
+```
+
+```{r}
+
+# Pulling in the 311 calls from 2010-2020 via Open Data DC.
+
+DC_311_2019 <- read.csv("Data/311_City_Service_Requests_in_2019.csv")
+DC_311_2018 <- read.csv("Data/311_City_Service_Requests_in_2018.csv")
+DC_311_2017 <- read.csv("Data/311_City_Service_Requests_in_2017.csv")
+DC_311_2020 <- read.csv("Data/311_City_Service_Requests_in_2020.csv")
+DC_311_2016 <- read.csv("Data/311_City_Service_Requests_in_2016.csv")
+DC_311_2014 <- read.csv("Data/311_City_Service_Requests_in_2014.csv")
+DC_311_2013 <- read.csv("Data/311_City_Service_Requests_in_2013.csv")
+DC_311_2012 <- read.csv("Data/311_City_Service_Requests_in_2012.csv")
+DC_311_2011 <- read.csv("Data/311_City_Service_Requests_in_2011.csv")
+catchment_area <- read_csv("Data/Human_Services_Catchment_Area.csv")
+DC_311_2015 <- read_csv("Data/311_City_Service_Requests_in_2015.csv")
+DC_311_2010 <- read_csv("Data/311_City_Service_Requests_in_2010.csv")
+GentDecline_DC <- read_excel("Data/GentDecline_DC.xlsx")
+
+# Census key
+
+key <- "uO4EK6I"
+census_api_key("366af81ca42273ae67ad0729766f54f041bd300d")
+
+```
+
+```{r}
+
+# To start, I explored the data to see what were the most common service codes each year and roughly how many cases were reported annually.
+
+DC_311_2019 %>%
+  filter(str_detect(DETAILS, "homeless")) %>%
+  select(SERVICECODE, SERVICECODEDESCRIPTION, SERVICETYPECODEDESCRIPTION, ORGANIZATIONACRONYM) %>%
+  group_by(SERVICECODE, SERVICECODEDESCRIPTION) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+
+```
+
+```{r}
+
+# Identified a list of search terms in the DETAILS category to identify additional cases that might not be captured by the service code: homeless, sleeping, homless, congregate and urinat (this is to get any itteration of the word). 
+
+breakdown_2019 <- DC_311_2019 %>%
+  filter(str_detect(DETAILS, "homeless")|
+           (str_detect(DETAILS, "sleeping"))|
+           (str_detect(DETAILS, "homless"))|
+           (str_detect(DETAILS, "congregate"))|
+           (str_detect(DETAILS, "urinat"))
+         ) %>%
+  select(SERVICECODE, SERVICECODEDESCRIPTION, DETAILS, ZIPCODE, LATITUDE, LONGITUDE)
+
+# Adding a new column with the year for when I later combine all years.
+
+breakdown_2019$new_column <- "2019"
+
+breakdown_2019 <- breakdown_2019 %>%
+  rename("YEAR" = "new_column")
+
+# After creating a breakdown for each year, I mapped out the incidents and used the service code as the marker to see if we could isolate any areas that had a high volume of relevant 311 calls each year individually and across all yeras.
+
+leaflet(breakdown_2019) %>% 
+  addTiles() %>%
+  addMarkers(~LONGITUDE, ~LATITUDE, popup = ~as.character(SERVICECODEDESCRIPTION))
+
+```
+
+```{r}
+
+# This shows which service codes were most common from 2010-2020.
+
+breakdown_all_years %>%
+  select(SERVICECODE, SERVICECODEDESCRIPTION) %>%
+  group_by(SERVICECODE, SERVICECODEDESCRIPTION) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+
+```
+
+```{r}
+
+# This shows which zip codes had the most incidents from 2010-2020.
+
+breakdown_all_years %>%
+  select(SERVICECODE, ZIPCODE) %>%
+  group_by(ZIPCODE) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+
+```
+
+```{r}
+
+# I wanted to look into the cases that specifically had "encampment" in the service code description. 
+
+encampment_data <- breakdown_all_years %>%
+  filter(str_detect(SERVICECODEDESCRIPTION, "Encampment"))
+
+# Through this, I found there were two types of classification for HOMEENCA: Homeless Encampment and Deputy Mayor for Health and Human Services Homeless Encampment. 
+
+encampment_data %>%
+  select(SERVICECODE, SERVICECODEDESCRIPTION, ZIPCODE, DETAILS) %>%
+  group_by(SERVICECODEDESCRIPTION) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+
+# I wanted to see if there are any differences between these two codes. They were pretty evenly spread out across the zip codes. I also ran the data to see if there was any difference in the years used, and there isn't anything significant.
+
+encampment_data %>%
+  select(SERVICECODE, SERVICECODEDESCRIPTION, ZIPCODE, DETAILS) %>%
+  group_by(SERVICECODEDESCRIPTION, ZIPCODE) %>%
+  summarise(total = n()) %>%
+  arrange(desc(total))
+
+```
+
+```{r}
+
+# Here, we can see the number of cases peaked in 2014 but never quite fell all the way back down. A quick Google search: The Washington Post heavily covered the homeless crisis in 2014, saying the numbers were surging. Mayor Vincent Gray said he couldn't "explain fully or fix quickly" the crisis.
+
+breakdown_all_years%>%
+  select(SERVICECODE, SERVICECODEDESCRIPTION, ZIPCODE, DETAILS, YEAR) %>%
+  group_by(YEAR) %>%
+  summarise(total = n())
+  
+```
+
+```{r}
+
+# Using TIGRIS, I turned all of the latitude and longitude coordinates into the GEOID in order to use census data to get demographics about the places with the highest call density.
+
+coord_2019 <- breakdown_2019
+
+coord_2019 <- coord_2019 %>%
+  mutate(census_tract = apply(coord_2019, 1, function(row) call_geolocator_latlon(row['LATITUDE'], row['LONGITUDE']))) %>%
+  rename("GEOID" = "census_tract") %>%
+  mutate(GEOID = str_sub(GEOID, 1, 11))
+
+```
+
+```{r}
+
+v17 <- load_variables(2018, "acs5", cache = TRUE)
+View(v17)
+
+# There is only one county GEOID that cooresponds with DC, which is 11001.
+
+DC_black <- get_acs(geography = "county", variables = c("B02001_003"), year = 2010)
+
+# Using census data to see the comparrisson of white residents and black residents in the tracts where the 311 calls came from.
+
+DC_black_tract <- get_acs(state = "District of Columbia", geography = "tract", variables = c("B02001_003"), year = 2010)
+DC_black_tract$new_column <- "black"
+DC_black_tract <- DC_black_tract %>%
+  rename("RACE" = "new_column")
+
+DC_white_tract <- get_acs(state = "District of Columbia", geography = "tract", variables = c("B02001_002"), year = 2010)
+DC_white_tract$new_column <- "white"
+DC_white_tract <- DC_white_tract %>%
+  rename("RACE" = "new_column")
+
+# Census tract data from 2006-2010
+DC_race_tract_2010 <- DC_black_tract %>%
+  rbind(DC_white_tract)
+
+# Going based off median household income, there was more of a pattern than with race. Most of these came up with a median household income of more than $50,000. Ran this for every year available to see if there was a trend in median income to volume of calls.
+
+median_household_income_tract_2010 <- get_acs(state = "District of Columbia", geography = "tract", variables = c("B19013_001"), year = 2010)
+
+```
