@@ -1,13 +1,7 @@
 Work Samples
 ================
 
-## Public Housing Evictions
-
-I was the lead data analyst on the [Howard Center for Investigative Journalism](https://merrill.umd.edu/about-merrill/signature-programs/the-howard-center-for-investigative-journalism/) fall 2020 project looking into evictions by public housing authorities across the country. For the project, we highlighted six counties across the country where public housing authorities were among the highest eviction filers in the county.
-
-For this project, I analyzed court reocrds and public housing authority documents from the six counties using a series of uniform questions we came up with.
-
-The analysis showed nonpayment or rent was the leading cause of eviction, and housing authorities often repeatedly filed against the same tenants over and over.
+These are highlights of the code I wrote while a graduate student at the [Howard Center for Investigative Journalism](https://merrill.umd.edu/about-merrill/signature-programs/the-howard-center-for-investigative-journalism/).
 
 ## CARES Act Moratorium
 
