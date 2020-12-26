@@ -11,7 +11,7 @@ The main finding was that nonpayment of rent was the leading reason tenants were
 
 The final code shared here was written collaboratively, but I did the work to get the team through the analysis.
 
-Read the [story](https://homeless.cnsmaryland.org/2020/12/15/public-housing-evictions/).
+Read the [story](https://homeless.cnsmaryland.org/2020/12/15/public-housing-evictions/).\
 Take a look at the [findings](https://howard-center-investigations.github.io/evictions/12_2020_factcheck.html).
 
 ## CARES Act Moratorium
